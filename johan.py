@@ -1,126 +1,158 @@
-# Johan - the VBN file decoder
-#
-# Author: robert@artandhacks.se
-#
-# This tool decodes and reassembles the binary
-# to it's original state.
-#
-# Johan can only properly process windows binaries.
-#
-# Johan likes to get down and boogie on files
-# quarantined by Symantec Endpoint Encryption 12.1
-# but will most likely work with other versions as well
-#
-# Since Symantec decided that it was not only a good idea to
-# encrypt the quarantined file with xor but to
-# also throw in two sets of "distortion" bytes in various places,
-# Johan will do the exact opposite.
-#
-# Johan will xor the VBN file using 0xA5 as its key, locate
-# the proper binary starting point and remove the distorting
-# bytes.
-#
-# 2014-02-22 v 1.0 - support for windows exe files
-# 2014-02-27 v 1.1 - added support for jpg,gif,pdf and rtf files
-# 2014-11.19 v 1.2 - added support for msi files
-# 2014-11-20 v 1.3 - rewrote the binary to text, and vice versa, handling
-# 2014-11-24 v 1.4 - rewrote the function for the external xor command
-
-
-import sys
-import os
+import Tkinter
 import binascii
 import time
-import subprocess
-from binascii import *
 
+from Tkinter import *
+from tkMessageBox import *
+from binascii import hexlify
+from binascii import unhexlify
+from tkFileDialog import *
 
+# Import to make main textarea scrollable.
+from ScrolledText import *
 
+# Read the VBN file as binary.
+def readInfile():
+	vbnFilePath = vbnEntry.get()
+	infile = open(vbnFilePath,'rb').read()
+	return infile
 
-####### Define functions ###############
+# Attempt to figure out the original file type
+# by reading the file suffix as described in the
+# VBN file meta data.
+#
+# It works by filtering out the first 100 characters
+# of the VBN file metadata and cutting out the file
+# suffix.
+def getFileType(infile):
+	# Cut out the first 100 characters
+	temp = infile[4:100]
+	# Find the last slash to indicate the start the malware file name.
+	fileNameStart = temp.rfind("\\")
+	# Carve out the file name based on the position the last slash.
+	temp = temp[fileNameStart+1:]
+	# Carve out the characters up, and including, the . to get the windows file suffix.
+	temp = temp[temp.find("."):]
+	# And strip out all non alpha numeric characters just to be sure that the file suffix
+	# is clean.
+	temp = filter(str.isalnum, temp)
+	fileType = temp
+	return fileType
+	
+# XOR the VBN file with a key of 0xA5 and assign the result to variable binstr.
+def getXorData(infile):
+	binstr =''
+	for i in range(len(infile)):
+		binstr += chr(0xA5 ^ ord(infile[i]))
+	return binstr
 
-def externalXorCommand():
-        subprocess.call(['./xor','-s','-o','XOR','-k','0XA5',sys.argv[1]])
+	
+# Convert every byte into the corresponding 2-digit hex representation.
+def getBinaryStringRepresentation(xordata):
+	hexstring = hexlify(xordata).upper()
+	return hexstring
 
-#########################################
+# Locate the malware file starting point and delete any data
+# found to that point.
+# Then remove the distortion sequences F6C6F4FFFF and F6FFEFFFFF added by Symantec.
+def getOriginalFileState(hexstring,filetype):
+	if filetype == 'exe':
+		hexstring = (hexstring[hexstring.find("4D5A"):])
+	elif filetype == 'jpg':
+		hexstring = (hexstring[hexstring.find("FFD8"):])
+	elif filetype == 'jpeg':
+		hexstring = (hexstring[hexstring.find("FFD8"):])
+	elif filetype == 'rtf':
+		hexstring = (hexstring[hexstring.find("7B5C"):])
+	elif filetype == 'gif':
+		hexstring = (hexstring[hexstring.find("4749"):])
+	elif filetype == 'pdf':
+		hexstring = (hexstring[hexstring.find("2550"):])
+	
+	hexstring = hexstring.replace("F6C6F4FFFF",'')
+	hexstring = hexstring.replace("F6FFEFFFFF",'')
+	
+	return hexstring
+	
+# Convert HEX string back to binary string again.
+def setHexBackToBinary(hexstring):
+	binstr = bytes(hexstring)
+	binstr = (binascii.unhexlify(binstr))
+	return binstr
 
+# Get the full VBN file path and write it to the vbnEntry field.
+def openFileWindow():
+	getVbnFile = askopenfilename(parent=top)
+	vbnEntry.delete(0,END)
+	vbnEntry.insert(0,getVbnFile)
+	
 
+# Get the desired output directory and write it to the VbnOutputDirectory field.
+def setVbnOutputDirectory():
+	VbnOutputDirectory = askdirectory(parent=top)
+	vbnOutputDirectory.delete(0,END)
+	vbnOutputDirectory.insert(0,VbnOutputDirectory)
+	
+def getDateAndTime():
+	dateandtime = time.strftime("%Y%m%d-%H%M")
+	return dateandtime
 
+# Write VBN back to disc in its original malwareish state.
+def writeOutfile(binstr,dateandtime):
+	malware = open(dateandtime+'.malware','w+b')
+	outputDirectory = vbnOutputDirectory.get()
+	textPad.insert(INSERT,dateandtime+'.malware written to '+outputDirectory)
+	malware.write(binstr)
+	malware.close()
 
-if (len(sys.argv)) == 3:
+# This method will in called when the user clicks the Go Johan! button.
+# It's simply a method that calls other methods.
+def start():
+	infile = readInfile()
+	filetype = getFileType(infile)
+	xordata = getXorData(infile)
+	hexstring = getBinaryStringRepresentation(xordata)
+	hexstring = getOriginalFileState(hexstring,filetype)
+	binstr = setHexBackToBinary(hexstring)
+	dateandtime = getDateAndTime()
+	outfile = writeOutfile(binstr,dateandtime)
 
-        # xor the VBN file using the external tool xor
-        externalXorCommand()
+# Initiate the main window.
+top = Tkinter.Tk()
+top.title("Johan 2 - The VBN tool")
 
-        # xor the VBN file using the external tool xor
-        # subprocess.call(['./xor','-s','-o','XOR','-k','0XA5',sys.argv[1]])
+# GUI components for selecting the VBN input file.
+label = Tkinter.Label(top,text="VBN file:")
+label.grid(row=0, column=0, padx=5, pady=5, sticky=W)
 
-        # assign variable to open the output file of external xor command
-        xorfilename = sys.argv[1]+".XOR.A5"
+vbnEntry = Tkinter.Entry(top,width=50)
+vbnEntry.grid(row=0, column=1, padx=5, pady=5)
 
-        # read symantec vbn file
-        vbnfilein = open(xorfilename,'rb').read()
+button = Tkinter.Button(top, text="Browse", command = openFileWindow)
+button.grid(row=0, column=2, padx=5, pady=5)
 
-        # read symantec vbn file as HEX in upper case
-        vbnfilein = hexlify(vbnfilein).upper()
+# GUI components for selecting the output directory and execution button.
+label = Tkinter.Label(top,text="Output directory:")
+label.grid(row=2, column=0, padx=5, pady=5, sticky=W)
 
-        # convert data to string
-        vbnfilein = str(vbnfilein,'UTF-8')
+vbnOutputDirectory = Tkinter.Entry(top,width=50)
+vbnOutputDirectory.grid(row=2, column=1, padx=5, pady=5)
 
+button = Tkinter.Button(top, text="Browse", command = setVbnOutputDirectory)
+button.grid(row=2, column=2, padx=5, pady=5)
 
-        # assign temp variable and find the matching HEX sequence
-        # of the desired output format and substring the results
-        temp = ""
+button = Tkinter.Button(top, text="Go Johan!", command = start)
+button.grid(row=5, column=1, padx=5, pady=5)
 
-        if sys.argv[2] == "exe":
-                temp = (vbnfilein[vbnfilein.find("4D5A"):])
-        elif sys.argv[2] == "jpg":
-                temp = (vbnfilein[vbnfilein.find("FFD8"):])
-        elif sys.argv[2] == "rtf":
-                temp = (vbnfilein[vbnfilein.find("7B5C"):])
-        elif sys.argv[2] == "gif":
-                temp = (vbnfilein[vbnfilein.find("4749"):])
-        elif sys.argv[2] == "pdf":
-                temp = (vbnfilein[vbnfilein.find("2550"):])
-        elif sys.argv[2] == "msi":
-                temp = (vbnfilein[vbnfilein.find("CFD0"):])
-        else:
-                print ("Unsupported file format")
+# GUI component for the textarea used for displaying status messages. 
+tkwidth = top.winfo_reqwidth()
+tkheight = top.winfo_reqheight()
 
+textPad = ScrolledText(top, width=70, height=30)
+textPad.grid(row=6, column=0, columnspan=4, padx=5, pady=5)
 
-        # locate and delete the distorted byte sequence
-        temp = temp.replace("F6C6F4FFFF",'')
-        temp = temp.replace("F6FFEFFFFF",'')
+# GUI component for the bottom footer.
+footerlabel = Tkinter.Label(top,text="2015 robert@artandhacks.se GPL2")
+footerlabel.grid(row=7, column=0,columnspan=4, padx=5, pady=5)
 
-
-        if len(temp) < 5:
-                print ("Hex byte string is way too short...aborting")
-                print ("The current string value is: "+temp)
-                exit()
-
-
-
-        # convert string back to HEX again"
-        outputfile = bytes(temp,'UTF-8')
-        outputfile = (binascii.unhexlify(outputfile))
-
-
-
-        # get current date and time to name the output file
-        dateandtime = time.strftime("%Y%m%d-%H%M.file")
-
-
-
-        # write file as payloadout[date].file in the current directory
-        payloadout = open(dateandtime,'wb')
-        payloadout.write(outputfile)
-        payloadout.close()
-        print (dateandtime+" written to current directory")
-
-else:
-
-        print ("Johan - the VBN file decoder")
-        print ("Version 1.1 - usage:python.exe johan.py [VBNfile] [file format]")
-        print ("")
-        print ("Currently supported file formats are: exe, jpg, rtf, gif, pdf, msi")
-        print ("Example: python.exe johan.ph GH67DF67D.VBN exe")
+top.mainloop()
