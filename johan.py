@@ -99,8 +99,8 @@ def getDateAndTime():
 
 # Write VBN back to disc in its original malwareish state.
 def writeOutfile(binstr,dateandtime):
-	malware = open(dateandtime+'.malware','w+b')
 	outputDirectory = vbnOutputDirectory.get()
+	malware = open(outputDirectory+'/'+dateandtime+'.malware','w+b')
 	textPad.insert(INSERT,dateandtime+'.malware written to '+outputDirectory)
 	malware.write(binstr)
 	malware.close()
